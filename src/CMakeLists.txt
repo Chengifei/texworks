@@ -208,6 +208,7 @@ ADD_EXECUTABLE(TeXworks ${GUI_TYPE}
   ${TEXWORKS_RCS}
   ${TeXworks_APP_ICONS}
 )
+set_property(TARGET TeXworks PROPERTY CXX_STANDARD 20)
 add_dependencies(TeXworks GitRev)
 
 if (UNIX AND NOT APPLE)

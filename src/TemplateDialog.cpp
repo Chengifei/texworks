@@ -57,7 +57,7 @@ void TemplateDialog::init()
 
 	Tw::Settings settings;
 	if (settings.value(QString::fromLatin1("syntaxColoring"), true).toBool()) {
-		TeXHighlighter * highlighter = new TeXHighlighter(texDoc);
+		TeXHighlighter * highlighter = new TeXHighlighter(*texDoc);
 		// For now, we use "LaTeX" highlighting for all files (which is probably
 		// reasonable in most/typical cases)
 		int idx = TeXHighlighter::syntaxOptions().indexOf(QStringLiteral("LaTeX"));

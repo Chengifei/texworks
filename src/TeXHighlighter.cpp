@@ -25,17 +25,18 @@
 #include "utils/ResourcesLibrary.h"
 
 #include <QTextCursor>
+#include <iterator>
 #include <climits> // for INT_MAX
 
 QList<TeXHighlighter::HighlightingSpec> *TeXHighlighter::syntaxRules = nullptr;
 QList<TeXHighlighter::TagPattern> *TeXHighlighter::tagPatterns = nullptr;
 
-TeXHighlighter::TeXHighlighter(Tw::Document::TeXDocument * parent)
+TeXHighlighter::TeXHighlighter(Tw::Document::TeXDocument& parent)
 	: NonblockingSyntaxHighlighter(parent)
 	, highlightIndex(-1)
 	, isTagging(true)
 	, _dictionary(nullptr)
-	, texDoc(parent)
+	, texDoc(&parent)
 {
 	loadPatterns();
 #if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
@@ -160,9 +161,10 @@ QStringList TeXHighlighter::syntaxOptions()
 	loadPatterns();
 
 	QStringList options;
-	if (syntaxRules)
-		foreach (const HighlightingSpec& spec, *syntaxRules)
+	if (syntaxRules) {
+		for (const HighlightingSpec& spec : *syntaxRules)
 			options << spec.name;
+	}
 	return options;
 }
 
@@ -280,30 +282,11 @@ void TeXHighlighter::loadPatterns()
 /// NonblockingSyntaxHighlighter
 ///////////////////////////////////////////////////////////////////////////////
 
-void NonblockingSyntaxHighlighter::setDocument(QTextDocument * doc)
-{
-	if (_parent)
-		disconnect(_parent);
-	_parent = doc;
-	_highlightRanges.clear();
-	_dirtyRanges.clear();
-	if (_parent) {
-		connect(_parent, &QTextDocument::destroyed, this, &NonblockingSyntaxHighlighter::unlinkFromDocument);
-		connect(_parent, &QTextDocument::contentsChange, this, &NonblockingSyntaxHighlighter::maybeRehighlightText);
-		rehighlight();
-	}
-}
 
 void NonblockingSyntaxHighlighter::rehighlight()
 {
-	if (!_parent)
-		return;
-
 	_highlightRanges.clear();
-	range r;
-	r.from = 0;
-	r.to = _parent->characterCount();
-	_highlightRanges.push_back(r);
+	_highlightRanges.emplace_back(0, document()->characterCount());
 	processWhenIdle();
 }
 
@@ -315,21 +298,18 @@ void NonblockingSyntaxHighlighter::rehighlightBlock(const QTextBlock & block)
 
 void NonblockingSyntaxHighlighter::maybeRehighlightText(int position, int charsRemoved, int charsAdded)
 {
-	if (!_parent)
-		return;
-
 	// Adjust ranges already present in _highlightRanges
-	for (int i = 0; i < _highlightRanges.size(); ++i) {
+	for (auto& r : _highlightRanges) {
 		// Adjust front (if necessary)
-		if (_highlightRanges[i].from >= position + charsRemoved)
-			_highlightRanges[i].from += charsAdded - charsRemoved;
-		else if (_highlightRanges[i].from >= position) // && _highlightRanges[i].from < position + charsRemoved
-			_highlightRanges[i].from = position + charsAdded;
+		if (r.from >= position + charsRemoved)
+			r.from += charsAdded - charsRemoved;
+		else if (r.from >= position) // && r.from < position + charsRemoved
+			r.from = position + charsAdded;
 		// Adjust back (if necessary)
-		if (_highlightRanges[i].to >= position + charsRemoved)
-			_highlightRanges[i].to += charsAdded - charsRemoved;
-		else if (_highlightRanges[i].to >= position) // && _highlightRanges[i].to < position + charsRemoved
-			_highlightRanges[i].to = position;
+		if (r.to >= position + charsRemoved)
+			r.to += charsAdded - charsRemoved;
+		else if (r.to >= position) // && r.to < position + charsRemoved
+			r.to = position;
 	}
 	// NB: pushHighlightRange() implicitly calls sanitizeHighlightRanges() so
 	// there is no need to call it here explicitly
@@ -350,41 +330,39 @@ void NonblockingSyntaxHighlighter::maybeRehighlightText(int position, int charsR
 	processWhenIdle();
 }
 
-void NonblockingSyntaxHighlighter::sanitizeHighlightRanges()
-{
+void NonblockingSyntaxHighlighter::sanitizeHighlightRanges() {
+	int n = (document() ? document()->characterCount() : 0);
+	for (auto it = _highlightRanges.begin(); it != _highlightRanges.end(); ++it) {
 	// 1) clip ranges
-	int n = (_parent ? _parent->characterCount() : 0);
-	for (int i = 0; i < _highlightRanges.size(); ++i) {
-		if (_highlightRanges[i].from < 0) _highlightRanges[i].from = 0;
-		if (_highlightRanges[i].to > n) _highlightRanges[i].to = n;
+		if (it->from < 0)
+		    it->from = 0;
+		if (it->to > n)
+		    it->to = n;
 	}
-
+	
 	// 2) remove any invalid ranges
-	for (int i = _highlightRanges.size() - 1; i >= 0; --i) {
-		if (_highlightRanges[i].to <= _highlightRanges[i].from)
-			_highlightRanges.remove(i);
-	}
+	std::erase_if(_highlightRanges, [](const range& r) { return r.to <= r.from; });
+
 	// 3) merge adjacent (or overlapping) ranges
 	// NB: There must not be any invalid ranges in here for this or else the
 	// merging algorithm would fail
-	for (int i = _highlightRanges.size() - 1; i >= 1; --i) {
-		if (_highlightRanges[i].from <= _highlightRanges[i - 1].to) {
-			if (_highlightRanges[i - 1].from > _highlightRanges[i].from)
-				_highlightRanges[i - 1].from = _highlightRanges[i].from;
-			if (_highlightRanges[i - 1].to < _highlightRanges[i].to)
-				_highlightRanges[i - 1].to = _highlightRanges[i].to;
-			_highlightRanges.remove(i);
-		}
-	}
+	if (!_highlightRanges.empty())
+	    for (auto rev_it = ++_highlightRanges.rbegin(); rev_it != _highlightRanges.rend(); ++rev_it) {
+		    if (std::prev(rev_it)->from <= rev_it->to) {
+			    rev_it->from = std::min(std::prev(rev_it)->from, rev_it->from);
+			    rev_it->to = std::max(std::prev(rev_it)->to, rev_it->to);
+		        // *std::prev(rev_it) will be removed via erase(rev_it.base())
+		        // std::prev(rev_it) == rev_it - 1
+			    // *(rev_it - 1) == *rev_it.base()
+			    _highlightRanges.erase(rev_it.base());
+		    }
+	    }
 }
 
 
 void NonblockingSyntaxHighlighter::process()
 {
 	_processingPending = false;
-	if (!_parent)
-		return;
-
 	QTime start = QTime::currentTime();
 
 	while (start.msecsTo(QTime::currentTime()) < MAX_TIME_MSECS && hasBlocksToHighlight()) {
@@ -423,25 +401,15 @@ void NonblockingSyntaxHighlighter::pushHighlightBlock(const QTextBlock & block)
 		pushHighlightRange(block.position(), block.position() + block.length());
 }
 
-void NonblockingSyntaxHighlighter::pushHighlightRange(const int from, const int to)
-{
-	int i{0};
-	range r;
-	r.from = from;
-	r.to = to;
-
+void NonblockingSyntaxHighlighter::pushHighlightRange(
+    const int from, const int to) {
+    // Original comment: (this makes no sense)
 	// Find the first old range such that the start of the new range is before
 	// the end of the old range
-	for (i = 0; i < _highlightRanges.size(); ++i) {
-		if (from < _highlightRanges[i].from)
-			break;
-	}
-
-	if (i == _highlightRanges.size())
-		_highlightRanges.push_back(r);
-	else
-		_highlightRanges.insert(i, r);
-
+	// the code keeps _highlightRanges partially ordered by `.from` (in descending order)
+	
+	auto it = std::upper_bound(_highlightRanges.cbegin(), _highlightRanges.cend(), from, [](int lhs, range rhs) { return lhs < rhs.from; });
+	_highlightRanges.emplace(it, from, to);
 	sanitizeHighlightRanges();
 }
 
@@ -451,7 +419,7 @@ void NonblockingSyntaxHighlighter::popHighlightRange(const int from, const int t
 		// Case 1: crop the end of the range (or the whole range)
 		if (to >= _highlightRanges[i].to) {
 			if (from <= _highlightRanges[i].from)
-				_highlightRanges.remove(i);
+				_highlightRanges.erase(_highlightRanges.cbegin() + i);
 			else
 				_highlightRanges[i].to = from;
 		}
@@ -461,7 +429,7 @@ void NonblockingSyntaxHighlighter::popHighlightRange(const int from, const int t
 			range r = _highlightRanges[i];
 			_highlightRanges[i].from = to;
 			r.to = from;
-			_highlightRanges.insert(i, r);
+			_highlightRanges.insert(_highlightRanges.cbegin() + i, r);
 			--i;
 		}
 		// Case 3: crop the front of the range
@@ -481,8 +449,11 @@ void NonblockingSyntaxHighlighter::blockHighlighted(const QTextBlock &block)
 
 const QTextBlock NonblockingSyntaxHighlighter::nextBlockToHighlight() const
 {
-	if (!_parent || _highlightRanges.empty()) return QTextBlock();
-	return _parent->findBlock(_highlightRanges[0].from);
+    // Don't check for !document() here
+    // If document() == nullptr, _highlightRanges should be empty.
+    // In case that does not hold, let it fail --- don't hide it.
+	if (_highlightRanges.empty()) return QTextBlock();
+	return document()->findBlock(_highlightRanges.front().from);
 }
 
 void NonblockingSyntaxHighlighter::pushDirtyRange(const int from, const int length)
@@ -493,26 +464,19 @@ void NonblockingSyntaxHighlighter::pushDirtyRange(const int from, const int leng
 	// lines would create a huge, unncessary overhead compared to calling it
 	// once.
 
-	int to = from + length;
-	if (_dirtyRanges.empty()) {
-		range r;
-		r.from = from;
-		r.to = to;
-		_dirtyRanges.push_back(r);
-	}
+	const int to = from + length;
+	if (_dirtyRanges.empty())
+		_dirtyRanges.emplace_back(from, to);
 	else {
-		if (_dirtyRanges[0].from > from) _dirtyRanges[0].from = from;
-		if (_dirtyRanges[0].to < to) _dirtyRanges[0].to = to;
+	    _dirtyRanges.front().from = std::min(_dirtyRanges.front().from, from);
+	    _dirtyRanges.front().to = std::max(_dirtyRanges.front().to, to);
 	}
 }
 
 void NonblockingSyntaxHighlighter::markDirtyContent()
 {
-	if (!_parent)
-		return;
-
-	foreach(range r, _dirtyRanges)
-		_parent->markContentsDirty(r.from, r.to - r.from);
+	for (auto& r : _dirtyRanges)
+		document()->markContentsDirty(r.from, r.to - r.from);
 	_dirtyRanges.clear();
 }
 
@@ -530,6 +494,6 @@ void NonblockingSyntaxHighlighter::processWhenIdle()
 {
 	if (!_processingPending) {
 		_processingPending = true;
-		QTimer::singleShot(IDLE_DELAY_TIME, this, SLOT(process()));
+		QTimer::singleShot(IDLE_DELAY_TIME, this, &NonblockingSyntaxHighlighter::process);
 	}
 }

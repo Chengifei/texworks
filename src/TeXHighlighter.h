@@ -23,7 +23,7 @@
 #define TEX_HIGHLIGHTER_H
 
 #include "document/SpellChecker.h"
-
+#include <vector>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -49,12 +49,25 @@ class NonblockingSyntaxHighlighter : public QObject
 	Q_OBJECT
 
 public:
-	NonblockingSyntaxHighlighter(QTextDocument * parent) : QObject(parent), _processingPending(false), _parent(nullptr), MAX_TIME_MSECS(5), IDLE_DELAY_TIME(40) { setDocument(parent); }
-	~NonblockingSyntaxHighlighter() override { setDocument(nullptr); }
-
-	QTextDocument * document() const { return _parent; }
-	void setDocument(QTextDocument * doc);
-
+	static constexpr int MAX_TIME_MSECS = 5;
+	static constexpr int IDLE_DELAY_TIME = 40;
+	NonblockingSyntaxHighlighter(QTextDocument& doc)
+	    : QObject(&doc), _processingPending(false) {
+	    connect(document(), &QTextDocument::contentsChange, this, &NonblockingSyntaxHighlighter::maybeRehighlightText);
+	    rehighlight();
+    }
+	~NonblockingSyntaxHighlighter() override {
+	    disconnect(document());
+	    QObject::setParent(nullptr);
+	}
+    NonblockingSyntaxHighlighter(NonblockingSyntaxHighlighter&& rhs) {
+        swap(rhs);
+    }
+    NonblockingSyntaxHighlighter& operator=(NonblockingSyntaxHighlighter&& rhs) {
+        swap(rhs);
+        return *this;
+    }
+	QTextDocument* document() const { return static_cast<QTextDocument*>(QObject::parent()); }
 public slots:
 	void rehighlight();
 	void rehighlightBlock(const QTextBlock & block);
@@ -65,8 +78,8 @@ protected:
 	QTextBlock currentBlock() const { return _currentBlock; }
 	int currentBlockState() const { return _currentBlock.userState(); }
 	int previousBlockState() const { return _currentBlock.previous().userState(); }
-
-	bool hasBlocksToHighlight() const { return !_highlightRanges.empty(); }
+    // use nextBlockToHighlight()
+	[[deprecated]] bool hasBlocksToHighlight() const noexcept { return !_highlightRanges.empty(); }
 	const QTextBlock nextBlockToHighlight() const;
 	void pushHighlightBlock(const QTextBlock & block);
 	void pushHighlightRange(const int from, const int to);
@@ -76,24 +89,29 @@ protected:
 	void pushDirtyRange(const int from, const int length);
 	void markDirtyContent();
 	void sanitizeHighlightRanges();
+	void swap(NonblockingSyntaxHighlighter& rhs) {
+        std::swap(_processingPending, rhs._processingPending);
+        std::swap(_highlightRanges, rhs._highlightRanges);
+        std::swap(_dirtyRanges, rhs._dirtyRanges);
+        auto block = _currentBlock; // QTextBlock is not cannot be move c/able
+        _currentBlock = rhs._currentBlock;
+        rhs._currentBlock = block;
+        std::swap(_currentFormatRanges, _currentFormatRanges);
+	}
 
 private slots:
 	void maybeRehighlightText(int position, int charsRemoved, int charsAdded);
 	void process();
 	void processWhenIdle();
-	void unlinkFromDocument() { setDocument(nullptr); }
 
 private:
 	bool _processingPending;
-	QTextDocument * _parent;
-	int MAX_TIME_MSECS;
-	int IDLE_DELAY_TIME;
 
 	struct range {
 		int from, to; // character ranges
 	};
-	QVector<range> _highlightRanges;
-	QVector<range> _dirtyRanges;
+	std::vector<range> _highlightRanges;
+	std::vector<range> _dirtyRanges;
 
 	QTextBlock _currentBlock;
 	QVector<QTextLayout::FormatRange> _currentFormatRanges;
@@ -104,7 +122,7 @@ class TeXHighlighter : public NonblockingSyntaxHighlighter
 	Q_OBJECT
 
 public:
-	explicit TeXHighlighter(Tw::Document::TeXDocument * parent);
+	explicit TeXHighlighter(Tw::Document::TeXDocument& parent);
 	void setActiveIndex(int index);
 
 	void setSpellChecker(Tw::Document::SpellChecker::Dictionary * dictionary);

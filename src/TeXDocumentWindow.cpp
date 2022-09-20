@@ -1205,7 +1205,7 @@ void TeXDocumentWindow::delayedInit()
 	if (_texDoc && !_texDoc->getHighlighter()) {
 		Tw::Settings settings;
 
-		TeXHighlighter * highlighter = new TeXHighlighter(_texDoc);
+		TeXHighlighter * highlighter = new TeXHighlighter(*_texDoc);
 		connect(textEdit, &CompletingEdit::rehighlight, highlighter, &TeXHighlighter::rehighlight);
 
 		// set up syntax highlighting

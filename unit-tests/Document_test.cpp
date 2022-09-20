@@ -46,13 +46,12 @@ Q_DECLARE_METATYPE(TWSynchronizer::TeXSyncPoint)
 Q_DECLARE_METATYPE(TWSynchronizer::PDFSyncPoint)
 Q_DECLARE_METATYPE(TWSynchronizer::Resolution)
 
-void NonblockingSyntaxHighlighter::setDocument(QTextDocument * doc) { Q_UNUSED(doc) }
 void NonblockingSyntaxHighlighter::rehighlight() { }
 void NonblockingSyntaxHighlighter::rehighlightBlock(const QTextBlock & block) { Q_UNUSED(block) }
 void NonblockingSyntaxHighlighter::maybeRehighlightText(int position, int charsRemoved, int charsAdded) { Q_UNUSED(position) Q_UNUSED(charsRemoved) Q_UNUSED(charsAdded) }
 void NonblockingSyntaxHighlighter::process() { }
 void NonblockingSyntaxHighlighter::processWhenIdle() {}
-TeXHighlighter::TeXHighlighter(Tw::Document::TeXDocument * parent) : NonblockingSyntaxHighlighter(parent) { }
+TeXHighlighter::TeXHighlighter(Tw::Document::TeXDocument& parent) : NonblockingSyntaxHighlighter(parent) { }
 void TeXHighlighter::highlightBlock(const QString &text) { Q_UNUSED(text) }
 
 char * toString(const TWSyncTeXSynchronizer::TeXSyncPoint & p) {
@@ -259,7 +258,7 @@ void TestDocument::getHighlighter()
 	Tw::Document::TeXDocument doc;
 	// Older versions of Qt don't support QCOMPARE of pointer and nullptr
 	QVERIFY(doc.getHighlighter() == nullptr);
-	TeXHighlighter highlighter(&doc);
+	TeXHighlighter highlighter(doc);
 	QCOMPARE(doc.getHighlighter(), &highlighter);
 }
 
